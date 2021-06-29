@@ -38,8 +38,6 @@ class Fewcoco(torch.utils.data.Dataset):
         self.cfg = cfg
 
         # Multi-prompt testing
-        # if self.mode in ["train", "val"]:
-        #     self._num_prompts = 1
         if self.cfg.TOKENS.ENABLE and self.mode == "test":
             self._num_prompts = len(self.cfg.TOKENS.PROMPTS)
         else:
@@ -81,13 +79,14 @@ class Fewcoco(torch.utils.data.Dataset):
 
         assert path_to_split.exists(), f"{path_to_split} does not exist."
 
-        self._label_idx_to_text = [
+        self._label_idx_to_text = sorted([
             p.name for p in path_to_split.iterdir() if p.is_dir()
-        ]
+        ])
         self._label_text_to_idx = {
             text: idx for idx, text in enumerate(self._label_idx_to_text)
         }
 
+        self._possible_labels_text = self.cfg.TENSORBOARD.CLASS_NAMES
         self._image_paths = sorted(list(path_to_split.glob("*/*.jpg")))
         self._labels_text = [p.parent.parts[-1] for p in self._image_paths]
         # print(self._labels_text)
@@ -106,13 +105,6 @@ class Fewcoco(torch.utils.data.Dataset):
             self._image_paths = chain_repeats(self._image_paths, self._num_repeats)
             self._labels_text = chain_repeats(self._labels_text, self._num_repeats)
             self._labels_idxs = chain_repeats(self._labels_idxs, self._num_repeats)
-
-        # We need this to ensemble the crops.
-        # self._spatial_idx = list(
-        #     chain.from_iterable(
-        #         [range(self._num_repeats) for _ in range(len(self._image_paths))]
-        #     )
-        # )
 
         logger.info(
             f"Few-shot COCO dataloader constructed " f"(size: {len(self._image_paths)})"
@@ -167,7 +159,7 @@ class Fewcoco(torch.utils.data.Dataset):
                     label_text = None
                     if self.cfg.TOKENS.ENABLE:
                         label_text = self.tokenize_text(
-                            self._labels_text[index], prompt_idx
+                            self._possible_labels_text, prompt_idx
                         )
                         label_text = label_text.squeeze(0)
 
@@ -189,6 +181,7 @@ class Fewcoco(torch.utils.data.Dataset):
                 )
 
         else:
+            image = image / 255.0
             image = utils.tensor_normalize(image, self.cfg.DATA.MEAN, self.cfg.DATA.STD)
             # N H W C -> N C H W.
             image = image.permute(0, 3, 1, 2)
@@ -210,8 +203,11 @@ class Fewcoco(torch.utils.data.Dataset):
         label_idx = self._labels_idxs[index]
         label_text = None
         if self.cfg.TOKENS.ENABLE:
-            label_text = self.tokenize_text(self._labels_text[index], prompt_idx)
-            label_text = label_text.squeeze(0)
+            # label_text = self.tokenize_text(self._labels_text[index], prompt_idx)
+            label_text = self.tokenize_text(
+                self._possible_labels_text, prompt_idx
+            )
+            # label_text = label_text.squeeze(0)
 
         image = image.squeeze(0)
 
@@ -297,7 +293,7 @@ class Fewcoco(torch.utils.data.Dataset):
         img_list = [transforms.ToTensor()(img) for img in img_list]
         return torch.stack(img_list)
 
-    def tokenize_text(self, text: str, prompt_idx: int) -> torch.Tensor:
+    def tokenize_text(self, texts: List[str], prompt_idx: int) -> torch.Tensor:
         """
         Tokenize text for model.
 
@@ -311,9 +307,12 @@ class Fewcoco(torch.utils.data.Dataset):
         if prompt_idx == -1:
             prompt_idx = random.randrange(len(self.cfg.TOKENS.PROMPTS))
 
-        prompt = self.cfg.TOKENS.PROMPTS[prompt_idx].replace("{}", text)
+        prompts = [
+            self.cfg.TOKENS.PROMPTS[prompt_idx].replace("{}", text)
+            for text in texts
+        ]
 
-        return clip.tokenize([prompt])
+        return torch.cat([clip.tokenize(prompt) for prompt in prompts])
 
     def __len__(self) -> int:
         """

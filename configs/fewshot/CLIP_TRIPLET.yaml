@@ -2,7 +2,7 @@ TRAIN:
   ENABLE: True
   DATASET: fewcoco
   BATCH_SIZE: 32
-  EVAL_PERIOD: 5
+  EVAL_PERIOD: 100
   CHECKPOINT_PERIOD: 50
   AUTO_RESUME: True
 TEST:
@@ -61,13 +61,14 @@ MIXUP:
 MODEL:
   NUM_CLASSES: 8
   MODEL_NAME: FewShotClip
-  LOSS_FUNC: cross_entropy
+  LOSS_FUNC: triplet_margin
+  MINING: True
   #LOSS_FUNC: cross_entropy
   #  DROPOUT_RATE: 0.5
-  DROPOUT_RATE: 0.1
+  DROPOUT_RATE: 0.5
   #  DROPOUT_RATE: 0.0
-  HEAD: BasicHead
-  HEAD_ACT: softmax
+  HEAD: Embedding
+  HEAD_ACT: sigmoid
 DATA_LOADER:
   NUM_WORKERS: 2
   PIN_MEMORY: True
@@ -93,7 +94,7 @@ TENSORBOARD:
     ENABLE: True
     GRAD_CAM:
       ENABLE: False
-      #      LAYER_LIST: ['_backbone/model/visual/conv1']
+#      LAYER_LIST: ['_backbone/model/visual/conv1']
       LAYER_LIST: ['_backbone/model/visual/transformer/resblocks/11/ln_1']
   CONFUSION_MATRIX:
     ENABLE: True

@@ -11,16 +11,16 @@ import fewpascal.datasets.utils as data_utils
 import fewpascal.utils.checkpoint as cu
 import fewpascal.utils.distributed as du
 import fewpascal.utils.logging as logging
-import fewpascal.utils.misc as misc
 import fewpascal.visualization.tensorboard_vis as tb
 from fewpascal.datasets import loader
 from fewpascal.models import build_model
-from fewpascal.visualization.gradcam_utils import GradCAM
+from fewpascal.visualization.gradcam_alt_utils import GradCAM
 from fewpascal.visualization.prediction_vis import WrongPredictionVis
 from fewpascal.visualization.utils import (
     GetWeightAndActivation,
     process_layer_index_data,
 )
+from fewpascal.visualization.video_visualizer import VideoVisualizer
 
 logger = logging.get_logger(__name__)
 
@@ -55,7 +55,7 @@ def run_visualization(vis_loader, model, cfg, writer=None):
 
     video_vis = VideoVisualizer(
         cfg.MODEL.NUM_CLASSES,
-        cfg.TENSORBOARD.CLASS_NAMES_PATH,
+        cfg.TENSORBOARD.CLASS_NAMES,
         cfg.TENSORBOARD.MODEL_VIS.TOPK_PREDS,
         cfg.TENSORBOARD.MODEL_VIS.COLORMAP,
     )
@@ -77,7 +77,11 @@ def run_visualization(vis_loader, model, cfg, writer=None):
         )
     logger.info("Finish drawing weights.")
     global_idx = -1
-    for inputs, labels, _, meta in tqdm.tqdm(vis_loader):
+    for batch in tqdm.tqdm(vis_loader):
+        if cfg.TOKENS.ENABLE:
+            inputs, labels_text, labels_idxs, idxs = batch
+        else:
+            inputs, labels_idxs, idxs = batch
         if cfg.NUM_GPUS:
             # Transfer the data to the current GPU device.
             if isinstance(inputs, (list,)):
@@ -85,23 +89,20 @@ def run_visualization(vis_loader, model, cfg, writer=None):
                     inputs[i] = inputs[i].cuda(non_blocking=True)
             else:
                 inputs = inputs.cuda(non_blocking=True)
-            labels = labels.cuda()
-            for key, val in meta.items():
-                if isinstance(val, (list,)):
-                    for i in range(len(val)):
-                        val[i] = val[i].cuda(non_blocking=True)
-                else:
-                    meta[key] = val.cuda(non_blocking=True)
 
-        if cfg.DETECTION.ENABLE:
-            activations, preds = model_vis.get_activations(
-                inputs, meta["boxes"]
-            )
-        else:
-            activations, preds = model_vis.get_activations(inputs)
+            if cfg.TOKENS.ENABLE:
+                labels_text = labels_text.cuda(non_blocking=True)
+            # Transfer the data to the current GPU device.
+            labels_idxs = labels_idxs.cuda()
+            idxs = idxs.cuda()
+
+        activations, preds = model_vis.get_activations(inputs)
+        # Make it video-like
+        # inputs = inputs.unsqueeze(-3)
+
         if cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.ENABLE:
             if cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.USE_TRUE_LABEL:
-                inputs, preds = gradcam(inputs, labels=labels)
+                inputs, preds = gradcam(inputs, labels=labels_idxs)
             else:
                 inputs, preds = gradcam(inputs)
         if cfg.NUM_GPUS:
@@ -119,9 +120,6 @@ def run_visualization(vis_loader, model, cfg, writer=None):
             inputs, activations, preds = [inputs], [activations], [preds]
 
         boxes = [None] * max(n_devices, 1)
-        if cfg.DETECTION.ENABLE and cfg.NUM_GPUS:
-            boxes = du.all_gather_unaligned(meta["boxes"])
-            boxes = [box.cpu() for box in boxes]
 
         if writer is not None:
             total_vids = 0
@@ -135,48 +133,36 @@ def run_visualization(vis_loader, model, cfg, writer=None):
                     global_idx += 1
                     total_vids += 1
                     if (
-                        cfg.TENSORBOARD.MODEL_VIS.INPUT_VIDEO
-                        or cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.ENABLE
+                            cfg.TENSORBOARD.MODEL_VIS.INPUT_VIDEO
+                            or cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.ENABLE
                     ):
-                        for path_idx, input_pathway in enumerate(cur_input):
-                            if cfg.TEST.DATASET == "ava" and cfg.AVA.BGR:
-                                video = input_pathway[
-                                    cur_batch_idx, [2, 1, 0], ...
-                                ]
-                            else:
-                                video = input_pathway[cur_batch_idx]
+                        video = cur_input[cur_batch_idx]
 
-                            if not cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.ENABLE:
-                                # Permute to (T, H, W, C) from (C, T, H, W).
-                                video = video.permute(1, 2, 3, 0)
-                                video = data_utils.revert_tensor_normalize(
-                                    video, cfg.DATA.MEAN, cfg.DATA.STD
-                                )
-                            else:
-                                # Permute from (T, C, H, W) to (T, H, W, C)
-                                video = video.permute(0, 2, 3, 1)
-                            bboxes = (
-                                None if cur_boxes is None else cur_boxes[:, 1:]
+                        if not cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.ENABLE:
+                            # Permute to (T, H, W, C) from (C, T, H, W).
+                            video = video.permute(1, 2, 3, 0)
+                            video = data_utils.revert_tensor_normalize(
+                                video, cfg.DATA.MEAN, cfg.DATA.STD
                             )
-                            cur_prediction = (
-                                cur_preds
-                                if cfg.DETECTION.ENABLE
-                                else cur_preds[cur_batch_idx]
-                            )
-                            video = video_vis.draw_clip(
-                                video, cur_prediction, bboxes=bboxes
-                            )
-                            video = (
-                                torch.from_numpy(np.array(video))
+                        else:
+                            # Permute from (T, C, H, W) to (T, H, W, C)
+                            video = video.permute(0, 2, 3, 1)
+                        bboxes = (
+                            None if cur_boxes is None else cur_boxes[:, 1:]
+                        )
+                        cur_prediction = preds[cur_batch_idx]
+                        video = video_vis.draw_clip(
+                            video, cur_prediction, bboxes=bboxes
+                        )
+                        video = (
+                            torch.from_numpy(np.array(video))
                                 .permute(0, 3, 1, 2)
                                 .unsqueeze(0)
-                            )
-                            writer.add_video(
-                                video,
-                                tag="Input {}/Pathway {}".format(
-                                    global_idx, path_idx + 1
-                                ),
-                            )
+                        )
+                        writer.add_video(
+                            video,
+                            tag="Input {}/".format(global_idx),
+                        )
                     if cfg.TENSORBOARD.MODEL_VIS.ACTIVATIONS:
                         writer.plot_weights_and_activations(
                             cur_activations,
@@ -246,6 +232,83 @@ def perform_wrong_prediction_vis(vis_loader, model, cfg):
     wrong_prediction_visualizer.clean()
 
 
+def perform_embedding_vis(writer, vis_loader, model, cfg):
+    """
+    Visualize video inputs with wrong predictions on Tensorboard.
+    Args:
+        writer: the tb writer.
+        vis_loader (loader): visualization loader.
+        model (model): the model to visualize.
+        cfg (CfgNode): configs. Details can be found in
+            fewpascal/config/defaults.py
+    """
+
+    def select_n_random(data, labels, images, n=4):
+        '''
+        Selects n random datapoints and corresponding labels and images
+        '''
+        assert len(data) == len(labels)
+        assert len(data) == len(images)
+
+        perm = torch.randperm(len(data))
+        return data[perm][:n], labels[perm][:n], images[perm][:n]
+
+    all_embeddings = []
+    all_labels = []
+    all_images = []
+
+    for batch in tqdm.tqdm(vis_loader):
+        if cfg.TOKENS.ENABLE:
+            inputs, labels_text, labels_idxs, idxs = batch
+        else:
+            inputs, labels_idxs, idxs = batch
+        if cfg.NUM_GPUS:
+            # Transfer the data to the current GPU device.
+            if isinstance(inputs, (list,)):
+                for i in range(len(inputs)):
+                    inputs[i] = inputs[i].cuda(non_blocking=True)
+            else:
+                inputs = inputs.cuda(non_blocking=True)
+
+            if cfg.TOKENS.ENABLE:
+                labels_text = labels_text.cuda(non_blocking=True)
+            # Transfer the data to the current GPU device.
+            labels_idxs = labels_idxs.cuda()
+            idxs = idxs.cuda()
+
+        # Perform the forward pass.
+        with torch.no_grad():
+            embeddings = model(inputs)
+
+        embeddings, labels, images = select_n_random(
+            embeddings, labels_idxs, inputs
+        )
+        all_embeddings.append(embeddings.cpu().detach())
+        all_labels.append(labels.cpu().detach())
+        all_images.append(images.cpu().detach())
+
+    embeddings = torch.cat(all_embeddings)
+    labels = torch.cat(all_labels)
+    images = torch.cat(all_images)
+    # N C H W -> N H W C
+    images = images.permute(0, 3, 1, 2)
+    images = data_utils.revert_tensor_normalize(
+        images, cfg.DATA.MEAN, cfg.DATA.STD
+    )
+    # N H W C -> N C H W
+    images = images.permute(0, 3, 1, 2)
+
+    class_labels = [
+        cfg.TENSORBOARD.CLASS_NAMES[label] for label in labels
+    ]
+    writer.writer.add_embedding(
+        embeddings,
+        metadata=class_labels,
+        label_img=images,
+        global_step=1
+    )
+
+
 def visualize(cfg):
     """
     Perform layer weights and activations visualization on the model.
@@ -254,8 +317,8 @@ def visualize(cfg):
             fewpascal/config/defaults.py
     """
     if cfg.TENSORBOARD.ENABLE and (
-        cfg.TENSORBOARD.MODEL_VIS.ENABLE
-        or cfg.TENSORBOARD.WRONG_PRED_VIS.ENABLE
+            cfg.TENSORBOARD.MODEL_VIS.ENABLE
+            or cfg.TENSORBOARD.WRONG_PRED_VIS.ENABLE
     ):
         # Set up environment.
         du.init_distributed_training(cfg)
@@ -271,18 +334,13 @@ def visualize(cfg):
         logger.info(cfg)
 
         # Build the video model and print model statistics.
-        model = build_model(cfg)
+        model = build_model(cfg, vis_mode=True)
         model.eval()
-        if du.is_master_proc() and cfg.LOG_MODEL_INFO:
-            misc.log_model_info(model, cfg, use_train_input=False)
 
         cu.load_test_checkpoint(cfg, model)
 
-        # Create video testing loaders.
+        # Create image testing loaders.
         vis_loader = loader.construct_loader(cfg, "test")
-
-        if cfg.DETECTION.ENABLE:
-            assert cfg.NUM_GPUS == cfg.TEST.BATCH_SIZE or cfg.NUM_GPUS == 0
 
         # Set up writer for logging to Tensorboard format.
         if du.is_master_proc(cfg.NUM_GPUS * cfg.NUM_SHARDS):
@@ -290,13 +348,12 @@ def visualize(cfg):
         else:
             writer = None
         if cfg.TENSORBOARD.PREDICTIONS_PATH != "":
-            assert not cfg.DETECTION.ENABLE, "Detection is not supported."
             logger.info(
                 "Visualizing class-level performance from saved results..."
             )
             if writer is not None:
                 with g_pathmgr.open(
-                    cfg.TENSORBOARD.PREDICTIONS_PATH, "rb"
+                        cfg.TENSORBOARD.PREDICTIONS_PATH, "rb"
                 ) as f:
                     preds, labels = pickle.load(f, encoding="latin1")
 
@@ -305,28 +362,10 @@ def visualize(cfg):
         if cfg.TENSORBOARD.MODEL_VIS.ENABLE:
             if cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.ENABLE:
                 assert (
-                    not cfg.DETECTION.ENABLE
-                ), "Detection task is currently not supported for Grad-CAM visualization."
-                if cfg.MODEL.ARCH in cfg.MODEL.SINGLE_PATHWAY_ARCH:
-                    assert (
                         len(cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.LAYER_LIST) == 1
-                    ), "The number of chosen CNN layers must be equal to the number of pathway(s), given {} layer(s).".format(
-                        len(cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.LAYER_LIST)
-                    )
-                elif cfg.MODEL.ARCH in cfg.MODEL.MULTI_PATHWAY_ARCH:
-                    assert (
-                        len(cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.LAYER_LIST) == 2
-                    ), "The number of chosen CNN layers must be equal to the number of pathway(s), given {} layer(s).".format(
-                        len(cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.LAYER_LIST)
-                    )
-                else:
-                    raise NotImplementedError(
-                        "Model arch {} is not in {}".format(
-                            cfg.MODEL.ARCH,
-                            cfg.MODEL.SINGLE_PATHWAY_ARCH
-                            + cfg.MODEL.MULTI_PATHWAY_ARCH,
-                        )
-                    )
+                ), "The number of chosen CNN layers must be equal to the number of pathway(s), given {} layer(s).".format(
+                    len(cfg.TENSORBOARD.MODEL_VIS.GRAD_CAM.LAYER_LIST)
+                )
             logger.info(
                 "Visualize model analysis for {} iterations".format(
                     len(vis_loader)
@@ -341,6 +380,14 @@ def visualize(cfg):
                 )
             )
             perform_wrong_prediction_vis(vis_loader, model, cfg)
+
+        if cfg.TENSORBOARD.EMBEDDING.ENABLE:
+            logger.info(
+                "Visualize Embeddings for {} iterations".format(
+                    len(vis_loader)
+                )
+            )
+            perform_embedding_vis(writer, vis_loader, model, cfg)
 
         if writer is not None:
             writer.close()

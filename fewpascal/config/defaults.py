@@ -172,8 +172,11 @@ _C.MODEL.MODEL_NAME = "FewShotClip"
 # Backbone, one of ["RN50", "RN101", "RN50x4", "ViT-B/32"]
 _C.MODEL.BACKBONE = "ViT-B/32"
 
-# Model name, one of ["", "BasicHead"]
+# Model name, one of ["", "BasicHead", "Embedding"]
 _C.MODEL.HEAD = "BasicHead"
+
+# Model name, one of ["", "BasicHead", "Embedding"]
+_C.MODEL.EMBEDDING_DIM = 64
 
 # The number of classes to predict for the model.
 _C.MODEL.NUM_CLASSES = 8
@@ -181,8 +184,14 @@ _C.MODEL.NUM_CLASSES = 8
 # Loss function.
 _C.MODEL.LOSS_FUNC = "cross_entropy"
 
+# Triplet margin loss parameters
+_C.MODEL.TRIPLET_LOSS_MARGIN = 0.2
+_C.MODEL.TRIPLET_LOSS_SWAP = False
+_C.MODEL.TRIPLET_LOSS_SMOOTH = False
+_C.MODEL.MINING = False
+
 # Dropout rate before final projection in the backbone.
-_C.MODEL.DROPOUT_RATE = 0.5
+_C.MODEL.DROPOUT_RATE = 0.2
 
 # The std to initialize the fc layer(s).
 _C.MODEL.FC_INIT_STD = 0.01
@@ -392,11 +401,8 @@ _C.TENSORBOARD.PREDICTIONS_PATH = ""
 # Path to directory for tensorboard logs.
 # Default to to cfg.OUTPUT_DIR/runs-{cfg.TRAIN.DATASET}.
 _C.TENSORBOARD.LOG_DIR = ""
-# Path to a json file providing class_name - id mapping
-# in the format {"class_name1": id1, "class_name2": id2, ...}.
-# This file must be provided to enable plotting confusion matrix
-# by a subset or parent categories.
-_C.TENSORBOARD.CLASS_NAMES_PATH = ""
+# Class names as a list of strings
+_C.TENSORBOARD.CLASS_NAMES = []
 
 # Path to a json file for categories -> classes mapping
 # in the format {"parent_class": ["child_class1", "child_class2",...], ...}.
@@ -440,6 +446,16 @@ _C.TENSORBOARD.MODEL_VIS.ACTIVATIONS = False
 
 # If False, skip visualizing input videos.
 _C.TENSORBOARD.MODEL_VIS.INPUT_VIDEO = False
+
+
+# Visualise an embedding.
+_C.TENSORBOARD.EMBEDDING = CfgNode()
+
+# If True, will visualise the embedding of the final layer.
+_C.TENSORBOARD.EMBEDDING.ENABLE = False
+
+# Sample rate.
+_C.TENSORBOARD.EMBEDDING.SAMPLE_RATE = True
 
 
 # List of strings containing data about layer names and their indexing to

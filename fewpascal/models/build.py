@@ -15,7 +15,7 @@ The call should return a `torch.nn.Module` object.
 """
 
 
-def build_model(cfg, gpu_id=None):
+def build_model(cfg, gpu_id=None, vis_mode=False):
     """
     Builds the video model.
     Args:
@@ -34,7 +34,7 @@ def build_model(cfg, gpu_id=None):
 
     # Construct the model
     name = cfg.MODEL.MODEL_NAME
-    model = MODEL_REGISTRY.get(name)(cfg)
+    model = MODEL_REGISTRY.get(name)(cfg, vis_mode)
 
     if cfg.NUM_GPUS:
         if gpu_id is None:

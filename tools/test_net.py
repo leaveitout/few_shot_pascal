@@ -8,15 +8,17 @@ import os
 import pickle
 import torch
 from iopath.common.file_io import g_pathmgr
+from pytorch_metric_learning import testers
+from pytorch_metric_learning.utils.accuracy_calculator import AccuracyCalculator
 
 import fewpascal.utils.checkpoint as cu
 import fewpascal.utils.distributed as du
 import fewpascal.utils.logging as logging
-import fewpascal.utils.misc as misc
-# import fewpascal.visualization.tensorboard_vis as tb
+import fewpascal.visualization.tensorboard_vis as tb
 from fewpascal.datasets import loader
 from fewpascal.models import build_model
 from fewpascal.utils.meters import TestMeter
+from fewpascal.datasets.build import build_dataset
 
 logger = logging.get_logger(__name__)
 
@@ -68,13 +70,14 @@ def perform_test(test_loader, model, test_meter, cfg, writer=None):
         test_meter.data_toc()
 
         # Perform the forward pass.
-        preds = model(inputs)
+        if cfg.TOKENS.ENABLE:
+            preds = model(inputs, labels_text)
+        else:
+            preds = model(inputs)
 
         # Gather all the predictions across all the devices to perform ensemble.
         if cfg.NUM_GPUS > 1:
-            preds, labels, video_idx = du.all_gather(
-                [preds, labels_idxs, idxs]
-            )
+            preds, labels, video_idx = du.all_gather([preds, labels_idxs, idxs])
         if cfg.NUM_GPUS:
             preds = preds.cpu()
             labels_idxs = labels_idxs.cpu()
@@ -82,9 +85,7 @@ def perform_test(test_loader, model, test_meter, cfg, writer=None):
 
         test_meter.iter_toc()
         # Update and log stats.
-        test_meter.update_stats(
-            preds.detach(), labels_idxs.detach(), idxs.detach()
-        )
+        test_meter.update_stats(preds.detach(), labels_idxs.detach(), idxs.detach())
         test_meter.log_iter_stats(cur_iter)
 
         test_meter.iter_tic()
@@ -105,12 +106,49 @@ def perform_test(test_loader, model, test_meter, cfg, writer=None):
             with g_pathmgr.open(save_path, "wb") as f:
                 pickle.dump([all_preds, all_labels], f)
 
-        logger.info(
-            "Successfully saved prediction results to {}".format(save_path)
-        )
+        logger.info("Successfully saved prediction results to {}".format(save_path))
 
     test_meter.finalize_metrics()
     return test_meter
+
+
+@torch.no_grad()
+def perform_test_triplet(cfg, model):
+    def get_all_embeddings(dataset, model):
+        def get_data_and_label(data):
+            return data[0], data[1]
+        tester = testers.BaseTester(data_and_label_getter=get_data_and_label)
+        return tester.get_all_embeddings(dataset, model)
+
+    def test_triplet(train_set, test_set, model, accuracy_calculator):
+        train_embeddings, train_labels = get_all_embeddings(train_set, model)
+        test_embeddings, test_labels = get_all_embeddings(test_set, model)
+        print("Computing accuracy")
+        accuracies = accuracy_calculator.get_accuracy(
+            test_embeddings, train_embeddings, test_labels, train_labels, False
+        )
+        print(
+            "Test set accuracy (Precision@1) = {}".format(accuracies["precision_at_1"])
+        )
+
+    # Construct the dataset
+    split = "train"
+    dataset_name = cfg.TRAIN.DATASET
+    # batch_size = int(cfg.TRAIN.BATCH_SIZE / max(1, cfg.NUM_GPUS))
+    # shuffle = True
+    # drop_last = True
+    train_set = build_dataset(dataset_name, cfg, split)
+
+    split = "test"
+    dataset_name = cfg.TEST.DATASET
+    # batch_size = int(cfg.TEST.BATCH_SIZE / max(1, cfg.NUM_GPUS))
+    # shuffle = False
+    # drop_last = False
+    test_set = build_dataset(dataset_name, cfg, split)
+
+    accuracy_calculator = AccuracyCalculator(include=("precision_at_1",), k=1)
+
+    test_triplet(train_set, test_set, model, accuracy_calculator)
 
 
 def test(cfg):
@@ -158,7 +196,6 @@ def test(cfg):
 
     assert (
         test_loader.dataset.num_images
-        # % (cfg.TEST.NUM_ENSEMBLE_VIEWS * cfg.TEST.NUM_SPATIAL_CROPS)
         % (num_prompts * num_flips * num_crops)
         == 0
     )
@@ -171,19 +208,17 @@ def test(cfg):
         cfg.DATA.ENSEMBLE_METHOD,
     )
 
-    # TODO: Reenable
-    # # Set up writer for logging to Tensorboard format.
-    # if cfg.TENSORBOARD.ENABLE and du.is_master_proc(
-    #     cfg.NUM_GPUS * cfg.NUM_SHARDS
-    # ):
-    #     writer = tb.TensorboardWriter(cfg)
-    # else:
-    #     writer = None
+    # Set up writer for logging to Tensorboard format.
+    if cfg.TENSORBOARD.ENABLE and du.is_master_proc(cfg.NUM_GPUS * cfg.NUM_SHARDS):
+        writer = tb.TensorboardWriter(cfg)
+    else:
+        writer = None
 
-    # # Perform multi-view test on the entire dataset.
-    # TODO: Reenable
-    # test_meter = perform_test(test_loader, model, test_meter, cfg, writer)
-    test_meter = perform_test(test_loader, model, test_meter, cfg, None)
-    # TODO: Reenable
-    # if writer is not None:
-    #     writer.close()
+    if cfg.MODEL.LOSS_FUNC in ["triplet_margin"]:
+        perform_test_triplet(cfg, model)
+    else:
+        # # Perform multi-view test on the entire dataset.
+        test_meter = perform_test(test_loader, model, test_meter, cfg, writer)
+
+    if writer is not None:
+        writer.close()

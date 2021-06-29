@@ -6,6 +6,7 @@
 import numpy as np
 import pprint
 import torch
+from pytorch_metric_learning import miners, distances, reducers
 
 import fewpascal.models.losses as losses
 import fewpascal.models.optimizer as optim
@@ -14,8 +15,7 @@ import fewpascal.utils.distributed as du
 import fewpascal.utils.logging as logging
 import fewpascal.utils.metrics as metrics
 import fewpascal.utils.misc as misc
-# TODO: Enable when tensorboard complete
-# import fewpascal.visualization.tensorboard_vis as tb
+import fewpascal.visualization.tensorboard_vis as tb
 from fewpascal.datasets import loader
 from fewpascal.datasets.mixup import MixUp
 from fewpascal.models import build_model
@@ -84,11 +84,36 @@ def train_epoch(
             inputs[0] = samples
 
         preds = model(inputs)
-        # Explicitly declare reduction to mean.
-        loss_fun = losses.get_loss_func(cfg.MODEL.LOSS_FUNC)(reduction="mean")
 
-        # Compute the loss.
-        loss = loss_fun(preds, labels_idxs)
+        if cfg.MODEL.LOSS_FUNC in ["triplet_margin"]:
+            distance = distances.CosineSimilarity()
+            reducer = reducers.ThresholdReducer(low=0)
+            loss_fun = losses.get_loss_func(
+                "triplet_margin"
+            )(
+                margin=cfg.MODEL.TRIPLET_LOSS_MARGIN,
+                swap=cfg.MODEL.TRIPLET_LOSS_SWAP,
+                smooth_loss=cfg.MODEL.TRIPLET_LOSS_SMOOTH,
+                triplets_per_anchor="all",
+                distance=distance,
+                reducer=reducer
+            )
+            if cfg.MODEL.MINING:
+                mining_func = mining_func = miners.TripletMarginMiner(
+                    margin=cfg.MODEL.TRIPLET_LOSS_MARGIN,
+                    distance=distance,
+                    type_of_triplets="semihard"
+                )
+        else:
+            # Explicitly declare reduction to mean.
+            loss_fun = losses.get_loss_func(cfg.MODEL.LOSS_FUNC)(reduction="mean")
+
+        if cfg.MODEL.LOSS_FUNC in ["triplet_margin"] and cfg.MODEL.MINING:
+            indices_tuple = mining_func(preds, labels_idxs)
+            loss = loss_fun(preds, labels_idxs, indices_tuple)
+        else:
+            # Compute the loss.
+            loss = loss_fun(preds, labels_idxs)
 
         # check Nan Loss.
         misc.check_nan_losses(loss)
@@ -327,12 +352,10 @@ def train(cfg):
     val_meter = ValMeter(len(val_loader), cfg)
 
     # set up writer for logging to Tensorboard format.
-    # TODO: Fix the tensorboard when training
-    # if cfg.TENSORBOARD.ENABLE and du.is_master_proc(cfg.NUM_GPUS * cfg.NUM_SHARDS):
-    #     writer = tb.TensorboardWriter(cfg)
-    # else:
-    #     writer = None
-    writer = None
+    if cfg.TENSORBOARD.ENABLE and du.is_master_proc(cfg.NUM_GPUS * cfg.NUM_SHARDS):
+        writer = tb.TensorboardWriter(cfg)
+    else:
+        writer = None
 
     # Perform the training loop.
     logger.info("Start epoch: {}".format(start_epoch + 1))
@@ -369,10 +392,7 @@ def train(cfg):
             cu.save_checkpoint(cfg.OUTPUT_DIR, model, optimizer, cur_epoch, cfg)
         # Evaluate the model on validation set.
         if is_eval_epoch:
-            # TODO: Uncomment when tensorboard working
-            # eval_epoch(val_loader, model, val_meter, cur_epoch, cfg, writer)
-            eval_epoch(val_loader, model, val_meter, cur_epoch, cfg, None)
+            eval_epoch(val_loader, model, val_meter, cur_epoch, cfg, writer)
 
-    # TODO: Uncomment when tensorboard working
-    # if writer is not None:
-    #     writer.close()
+    if writer is not None:
+        writer.close()

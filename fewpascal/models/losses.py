@@ -6,6 +6,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from pytorch_metric_learning.losses import TripletMarginLoss
 
 
 class SoftTargetCrossEntropy(nn.Module):
@@ -37,6 +38,7 @@ _LOSSES = {
     "bce": nn.BCELoss,
     "bce_logit": nn.BCEWithLogitsLoss,
     "soft_cross_entropy": SoftTargetCrossEntropy,
+    "triplet_margin": TripletMarginLoss,
 }
 
 

@@ -7,9 +7,7 @@ from fewpascal.utils.parser import load_config, parse_args
 
 from test_net import test
 from train_net import train
-# TODO: Enable when complete
-# from visualization import visualize
-# from demo_net import demo
+from visualization import visualize
 
 
 def main():
@@ -28,17 +26,11 @@ def main():
     if cfg.TEST.ENABLE:
         launch_job(cfg=cfg, init_method=args.init_method, func=test)
 
-    # TODO: Enable when completed.
     # Perform model visualization.
-    # if cfg.TENSORBOARD.ENABLE and (
-    #     cfg.TENSORBOARD.MODEL_VIS.ENABLE or cfg.TENSORBOARD.WRONG_PRED_VIS.ENABLE
-    # ):
-    #     launch_job(cfg=cfg, init_method=args.init_method, func=visualize)
-
-    # TODO: Enable when completed.
-    # Run demo.
-    # if cfg.DEMO.ENABLE:
-    #     demo(cfg)
+    if cfg.TENSORBOARD.ENABLE and (
+        cfg.TENSORBOARD.MODEL_VIS.ENABLE or cfg.TENSORBOARD.WRONG_PRED_VIS.ENABLE
+    ):
+        launch_job(cfg=cfg, init_method=args.init_method, func=visualize)
 
 
 if __name__ == "__main__":

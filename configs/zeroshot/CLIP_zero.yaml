@@ -1,5 +1,5 @@
 TRAIN:
-  ENABLE: True
+  ENABLE: False
   DATASET: fewcoco
   BATCH_SIZE: 32
   EVAL_PERIOD: 5
@@ -11,12 +11,14 @@ TEST:
   BATCH_SIZE: 32
   FLIPPING: True
   NUM_SPATIAL_CROPS: 3
+TOKENS:
+  ENABLE: True
 DATA:
   TRAIN_JITTER_SCALES: [256, 320]
   TRAIN_CROP_SIZE: 224
   TEST_CROP_SIZE: 224
   INPUT_CHANNEL_NUM: [3]
-  PATH_TO_DATA_DIR: "/home/sean/Documents/Datasets/coco_crops_few_shot"
+  PATH_TO_DATA_DIR: "/home/sean/Documents/Datasets/coco_crops_zero_shot"
   ENSEMBLE_METHOD: "sum"
 SOLVER:
   BASE_LR_SCALE_NUM_SHARDS: True
@@ -59,14 +61,14 @@ MIXUP:
 #  WARMUP_START_LR: 0.000125
 #  OPTIMIZING_METHOD: sgd
 MODEL:
-  NUM_CLASSES: 8
-  MODEL_NAME: FewShotClip
+  NUM_CLASSES: 9
+  MODEL_NAME: ZeroShotClip
   LOSS_FUNC: cross_entropy
   #LOSS_FUNC: cross_entropy
   #  DROPOUT_RATE: 0.5
-  DROPOUT_RATE: 0.1
+#  DROPOUT_RATE: 0.1
   #  DROPOUT_RATE: 0.0
-  HEAD: BasicHead
+  HEAD: Similarity
   HEAD_ACT: softmax
 DATA_LOADER:
   NUM_WORKERS: 2
@@ -78,6 +80,7 @@ OUTPUT_DIR: .
 TENSORBOARD:
   ENABLE: False
   CLASS_NAMES: [
+      'bench',
       'airplane',
       'bicycle',
       'boat',
@@ -93,7 +96,6 @@ TENSORBOARD:
     ENABLE: True
     GRAD_CAM:
       ENABLE: False
-      #      LAYER_LIST: ['_backbone/model/visual/conv1']
       LAYER_LIST: ['_backbone/model/visual/transformer/resblocks/11/ln_1']
   CONFUSION_MATRIX:
     ENABLE: True

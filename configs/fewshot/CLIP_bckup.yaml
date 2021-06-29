@@ -1,16 +1,17 @@
 TRAIN:
   ENABLE: True
   DATASET: fewcoco
-  BATCH_SIZE: 32
+  BATCH_SIZE: 16
   EVAL_PERIOD: 5
   CHECKPOINT_PERIOD: 50
   AUTO_RESUME: True
 TEST:
   ENABLE: True
   DATASET: fewcoco
-  BATCH_SIZE: 32
+  BATCH_SIZE: 16
   FLIPPING: True
   NUM_SPATIAL_CROPS: 3
+  SAVE_RESULTS_PATH: 'preds.pkl'
 DATA:
   TRAIN_JITTER_SCALES: [256, 320]
   TRAIN_CROP_SIZE: 224
@@ -34,7 +35,7 @@ SOLVER:
 AUG:
   ENABLE: False
   COLOR_JITTER: 0.4
-  AA_TYPE: rand-m1-n6-mstd0.5-inc1
+  AA_TYPE: rand-m3-n6-mstd0.5-inc1
   INTERPOLATION: bicubic
   RE_PROB: 0.25
   RE_MODE: pixel
@@ -61,13 +62,12 @@ MIXUP:
 MODEL:
   NUM_CLASSES: 8
   MODEL_NAME: FewShotClip
+#  LOSS_FUNC: soft_cross_entropy
   LOSS_FUNC: cross_entropy
-  #LOSS_FUNC: cross_entropy
   #  DROPOUT_RATE: 0.5
   DROPOUT_RATE: 0.1
   #  DROPOUT_RATE: 0.0
-  HEAD: BasicHead
-  HEAD_ACT: softmax
+  HEAD_ACT: sigmoid
 DATA_LOADER:
   NUM_WORKERS: 2
   PIN_MEMORY: True
@@ -76,7 +76,7 @@ NUM_SHARDS: 1
 RNG_SEED: 0
 OUTPUT_DIR: .
 TENSORBOARD:
-  ENABLE: False
+  ENABLE: True
   CLASS_NAMES: [
       'airplane',
       'bicycle',
@@ -93,7 +93,7 @@ TENSORBOARD:
     ENABLE: True
     GRAD_CAM:
       ENABLE: False
-      #      LAYER_LIST: ['_backbone/model/visual/conv1']
+#      LAYER_LIST: ['_backbone/model/visual/conv1']
       LAYER_LIST: ['_backbone/model/visual/transformer/resblocks/11/ln_1']
   CONFUSION_MATRIX:
     ENABLE: True

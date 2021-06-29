@@ -1,14 +1,14 @@
 TRAIN:
   ENABLE: True
   DATASET: fewcoco
-  BATCH_SIZE: 16
+  BATCH_SIZE: 32
   EVAL_PERIOD: 5
   CHECKPOINT_PERIOD: 50
   AUTO_RESUME: True
 TEST:
   ENABLE: True
   DATASET: fewcoco
-  BATCH_SIZE: 128
+  BATCH_SIZE: 32
   FLIPPING: True
   NUM_SPATIAL_CROPS: 3
 DATA:
@@ -18,23 +18,23 @@ DATA:
   INPUT_CHANNEL_NUM: [3]
   PATH_TO_DATA_DIR: "/home/sean/Documents/Datasets/coco_crops_few_shot"
   ENSEMBLE_METHOD: "sum"
-SOLVER:
-  BASE_LR_SCALE_NUM_SHARDS: True
-  BASE_LR: 0.0025
-  LR_POLICY: cosine
-  MAX_EPOCH: 60
-  MOMENTUM: 0.9
-  WEIGHT_DECAY: 0.0005
-  WARMUP_EPOCHS: 6.0
-  WARMUP_START_LR: 1e-8
-  OPTIMIZING_METHOD: adamw
-  COSINE_AFTER_WARMUP: True
-  COSINE_END_LR: 1e-5
-  ZERO_WD_1D_PARAM: True
+#SOLVER:
+#  BASE_LR_SCALE_NUM_SHARDS: True
+#  BASE_LR: 0.0025
+#  LR_POLICY: cosine
+#  MAX_EPOCH: 60
+#  MOMENTUM: 0.9
+#  WEIGHT_DECAY: 0.0005
+#  WARMUP_EPOCHS: 6.0
+#  WARMUP_START_LR: 1e-8
+#  OPTIMIZING_METHOD: adamw
+#  COSINE_AFTER_WARMUP: True
+#  COSINE_END_LR: 1e-5
+#  ZERO_WD_1D_PARAM: True
 AUG:
   ENABLE: False
   COLOR_JITTER: 0.4
-  AA_TYPE: rand-m3-n6-mstd0.5-inc1
+  AA_TYPE: rand-m1-n6-mstd0.5-inc1
   INTERPOLATION: bicubic
   RE_PROB: 0.25
   RE_MODE: pixel
@@ -47,26 +47,27 @@ MIXUP:
   PROB: 1.0
   SWITCH_PROB: 0.5
   LABEL_SMOOTH_VALUE: 0.1
-#SOLVER:
-#  BASE_LR: 0.01
-#  LR_POLICY: steps_with_relative_lrs
-#  STEPS: [0, 10, 15, 20]
-#  LRS: [1, 0.1, 0.01, 0.001]
-#  MAX_EPOCH: 20
-#  MOMENTUM: 0.9
-#  WEIGHT_DECAY: 1e-7
-#  WARMUP_EPOCHS: 5.0
-#  WARMUP_START_LR: 0.000125
-#  OPTIMIZING_METHOD: sgd
+SOLVER:
+  BASE_LR: 0.01
+  LR_POLICY: steps_with_relative_lrs
+  STEPS: [0, 10, 15, 20]
+  LRS: [1, 0.1, 0.01, 0.001]
+  MAX_EPOCH: 20
+  MOMENTUM: 0.9
+  WEIGHT_DECAY: 1e-7
+  WARMUP_EPOCHS: 5.0
+  WARMUP_START_LR: 0.000125
+  OPTIMIZING_METHOD: sgd
 MODEL:
   NUM_CLASSES: 8
   MODEL_NAME: FewShotClip
-#  LOSS_FUNC: soft_cross_entropy
-  LOSS_FUNC: cross_entropy
+  LOSS_FUNC: triplet_margin
+  #LOSS_FUNC: cross_entropy
   #  DROPOUT_RATE: 0.5
   DROPOUT_RATE: 0.1
   #  DROPOUT_RATE: 0.0
-  HEAD_ACT: sigmoid
+  HEAD: Embedding
+  HEAD_ACT: softmax
 DATA_LOADER:
   NUM_WORKERS: 2
   PIN_MEMORY: True
@@ -74,3 +75,27 @@ NUM_GPUS: 1
 NUM_SHARDS: 1
 RNG_SEED: 0
 OUTPUT_DIR: .
+TENSORBOARD:
+  ENABLE: False
+  CLASS_NAMES: [
+      'airplane',
+      'bicycle',
+      'boat',
+      'bus',
+      'car',
+      'motorcycle',
+      'train',
+      'truck',
+  ]
+  WRONG_PRED_VIS:
+    ENABLE: False
+  MODEL_VIS:
+    ENABLE: True
+    GRAD_CAM:
+      ENABLE: False
+#      LAYER_LIST: ['_backbone/model/visual/conv1']
+      LAYER_LIST: ['_backbone/model/visual/transformer/resblocks/11/ln_1']
+  CONFUSION_MATRIX:
+    ENABLE: True
+  EMBEDDING:
+    ENABLE: True
